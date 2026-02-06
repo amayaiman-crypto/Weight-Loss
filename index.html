@@ -22,27 +22,22 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
         
-        const { 
-            LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
-        } = window.Recharts || {};
-
-        const EmojiIcon = ({ name, size = "text-xl" }) => {
-            const icons = {
-                Calendar: "📅",
-                History: "⏳",
-                TrendingUp: "📈",
-                TrendingDown: "📉",
-                Trash2: "🗑️",
-                Scale: "⚖️",
-                Target: "🎯",
-                Trophy: "🏆",
-                BarChart: "📊",
-                List: "📋"
-            };
-            return <span className={size} role="img" aria-label={name}>{icons[name] || "•"}</span>;
-        };
-
         const App = () => {
+            // Safely access Recharts from the window object
+            const RechartsObj = window.Recharts;
+            
+            if (!RechartsObj) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen">
+                        <div className="text-slate-400 font-medium animate-pulse">Loading Chart Engine...</div>
+                    </div>
+                );
+            }
+
+            const { 
+                LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+            } = RechartsObj;
+
             const [weights, setWeights] = useState(() => {
                 try {
                     const saved = localStorage.getItem('weight_logs');
@@ -65,10 +60,6 @@
                 localStorage.setItem('weight_logs', JSON.stringify(weights));
             }, [weights]);
 
-            useEffect(() => {
-                localStorage.setItem('weight_goals', JSON.stringify(goals));
-            }, [goals]);
-
             // Ensure daily logs are always sorted chronologically
             const sortedWeights = useMemo(() => {
                 return [...weights]
@@ -77,7 +68,6 @@
             }, [weights]);
 
             // Helper to find the Sunday (start of week) for any given date
-            // Using parts to avoid timezone shifting
             const getWeekRange = (dateString) => {
                 const [y, m, d] = dateString.split('-').map(Number);
                 const date = new Date(y, m - 1, d); 
@@ -122,7 +112,6 @@
                     }));
             }, [sortedWeights]);
 
-            // Reverse the averages specifically for the list at the bottom (newest first)
             const weeklyAveragesReversed = useMemo(() => [...weeklyAverages].reverse(), [weeklyAverages]);
 
             const stats = useMemo(() => {
@@ -156,32 +145,6 @@
                 };
             }, [sortedWeights]);
 
-            const monthlyAverages = useMemo(() => {
-                const months = [];
-                // Start from earliest log or Dec 2025
-                let start = sortedWeights.length > 0 
-                    ? new Date(new Date(sortedWeights[0].date).getFullYear(), new Date(sortedWeights[0].date).getMonth(), 1)
-                    : new Date(2025, 11, 1);
-                
-                const end = new Date();
-                end.setMonth(end.getMonth() + 1);
-
-                const current = new Date(start);
-                while (current <= end && months.length < 12) {
-                    const label = current.toLocaleString('default', { month: 'short', year: 'numeric' });
-                    const m = current.getMonth();
-                    const y = current.getFullYear();
-                    const logs = sortedWeights.filter(w => {
-                        const d = new Date(w.date + 'T00:00:00');
-                        return d.getMonth() === m && d.getFullYear() === y;
-                    });
-                    const avg = logs.length ? (logs.reduce((s, w) => s + w.value, 0) / logs.length).toFixed(1) : null;
-                    months.push({ label, avg });
-                    current.setMonth(current.getMonth() + 1);
-                }
-                return months;
-            }, [sortedWeights]);
-
             const handleAddWeight = (e) => {
                 e.preventDefault();
                 const val = parseFloat(inputValue);
@@ -195,6 +158,14 @@
             const formatDate = (dateStr) => {
                 const [y, m, d] = dateStr.split('-');
                 return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            };
+
+            const EmojiIcon = ({ name, size = "text-xl" }) => {
+                const icons = {
+                    Calendar: "📅", History: "⏳", TrendingUp: "📈", TrendingDown: "📉",
+                    Trash2: "🗑️", Scale: "⚖️", Target: "🎯", Trophy: "🏆", BarChart: "📊", List: "📋"
+                };
+                return <span className={size} role="img" aria-label={name}>{icons[name] || "•"}</span>;
             };
 
             return (
@@ -345,24 +316,6 @@
                                     )}
                                 </div>
                             </div>
-
-                            {/* Monthly Averages */}
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                                <div className="flex items-center gap-3 mb-6">
-                                    <EmojiIcon name="BarChart" />
-                                    <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Monthly Average Breakdown</h2>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                    {monthlyAverages.slice(-8).map((m, idx) => (
-                                        <div key={idx} className="p-3 border border-slate-50 rounded-xl bg-slate-50/30">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase mb-1">{m.label}</p>
-                                            <p className={`text-xl font-bold italic ${m.avg ? 'text-slate-800' : 'text-slate-200'}`}>
-                                                {m.avg ? `${m.avg} ${unit}` : 'No Data'}
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
                         </div>
                     </div>
 
@@ -372,33 +325,30 @@
                             <EmojiIcon name="List" />
                             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Weekly Average Repository</h2>
                         </div>
-                        {weeklyAveragesReversed.length === 0 ? (
-                            <div className="p-12 text-center text-slate-300 italic border-2 border-dashed border-slate-50 rounded-2xl text-sm uppercase font-bold tracking-widest">
-                                Start logging weights to build your weekly history
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {weeklyAveragesReversed.map((week, idx) => (
-                                    <div key={idx} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-blue-200 transition-colors">
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Week Range</span>
-                                            <span className="text-sm font-bold text-slate-700">{week.fullRange}</span>
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase block tracking-tighter">Avg ({week.count} logs)</span>
-                                            <span className="text-2xl font-black italic text-blue-600">{week.avg} <small className="text-[10px] not-italic text-blue-300">{unit}</small></span>
-                                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {weeklyAveragesReversed.map((week, idx) => (
+                                <div key={idx} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-blue-200 transition-colors">
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Week Range</span>
+                                        <span className="text-sm font-bold text-slate-700">{week.fullRange}</span>
                                     </div>
-                                ))}
-                            </div>
-                        )}
+                                    <div className="text-right">
+                                        <span className="text-[10px] font-black text-slate-400 uppercase block tracking-tighter">Avg ({week.count} logs)</span>
+                                        <span className="text-2xl font-black italic text-blue-600">{week.avg} <small className="text-[10px] not-italic text-blue-300">{unit}</small></span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        // Safety wrapper to ensure external libraries are loaded before mounting
+        window.onload = () => {
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<App />);
+        };
     </script>
 </body>
 </html>
