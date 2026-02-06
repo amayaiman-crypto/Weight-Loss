@@ -23,7 +23,7 @@
         const { useState, useEffect, useMemo } = React;
         
         const { 
-            LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+            LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
         } = window.Recharts || {};
 
         const EmojiIcon = ({ name, size = "text-xl" }) => {
@@ -71,12 +71,16 @@
 
             // Ensure daily logs are always sorted chronologically
             const sortedWeights = useMemo(() => {
-                return [...weights].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                return [...weights]
+                    .map(w => ({ ...w, value: parseFloat(w.value) }))
+                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
             }, [weights]);
 
             // Helper to find the Sunday (start of week) for any given date
+            // Using parts to avoid timezone shifting
             const getWeekRange = (dateString) => {
-                const date = new Date(dateString + 'T00:00:00');
+                const [y, m, d] = dateString.split('-').map(Number);
+                const date = new Date(y, m - 1, d); 
                 const dayOfWeek = date.getDay();
                 const sun = new Date(date);
                 sun.setDate(date.getDate() - dayOfWeek);
@@ -103,7 +107,7 @@
                             dateKey: weekKey 
                         };
                     }
-                    weeksMap[weekKey].total += parseFloat(log.value);
+                    weeksMap[weekKey].total += log.value;
                     weeksMap[weekKey].count += 1;
                 });
 
@@ -113,7 +117,7 @@
                         dateKey: w.dateKey,
                         label: w.sun.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
                         fullRange: `${w.sun.toLocaleDateString(undefined, {month:'short', day:'numeric'})} - ${w.sat.toLocaleDateString(undefined, {month:'short', day:'numeric'})}`,
-                        avg: Number((w.total / w.count).toFixed(1)), // Ensure it is a pure number for Recharts
+                        avg: Number((w.total / w.count).toFixed(1)),
                         count: w.count
                     }));
             }, [sortedWeights]);
@@ -124,40 +128,56 @@
             const stats = useMemo(() => {
                 if (!sortedWeights.length) return { avgThisWeek: null, avgLastWeek: null, diff: null, totalProgress: null };
                 
-                const { sun: startOfThisWeek } = getWeekRange(new Date().toISOString().split('T')[0]);
+                const todayStr = new Date().toISOString().split('T')[0];
+                const { sun: startOfThisWeek } = getWeekRange(todayStr);
                 const startOfLastWeek = new Date(startOfThisWeek);
                 startOfLastWeek.setDate(startOfThisWeek.getDate() - 7);
                 
-                const thisWeekLogs = sortedWeights.filter(w => new Date(w.date + 'T00:00:00') >= startOfThisWeek);
+                const thisWeekLogs = sortedWeights.filter(w => {
+                    const d = new Date(w.date + 'T00:00:00');
+                    return d >= startOfThisWeek;
+                });
                 const lastWeekLogs = sortedWeights.filter(w => {
                     const d = new Date(w.date + 'T00:00:00');
                     return d >= startOfLastWeek && d < startOfThisWeek;
                 });
                 
-                const avgThisWeek = thisWeekLogs.length ? thisWeekLogs.reduce((acc, c) => acc + parseFloat(c.value), 0) / thisWeekLogs.length : null;
-                const avgLastWeek = lastWeekLogs.length ? lastWeekLogs.reduce((acc, c) => acc + parseFloat(c.value), 0) / lastWeekLogs.length : null;
+                const avgThisWeek = thisWeekLogs.length ? thisWeekLogs.reduce((acc, c) => acc + c.value, 0) / thisWeekLogs.length : null;
+                const avgLastWeek = lastWeekLogs.length ? lastWeekLogs.reduce((acc, c) => acc + c.value, 0) / lastWeekLogs.length : null;
                 
                 const firstWeight = sortedWeights[0].value;
                 const latestWeight = sortedWeights[sortedWeights.length - 1].value;
 
-                return { avgThisWeek, avgLastWeek, diff: (avgThisWeek !== null && avgLastWeek !== null) ? avgThisWeek - avgLastWeek : null, totalProgress: latestWeight - firstWeight };
+                return { 
+                    avgThisWeek, 
+                    avgLastWeek, 
+                    diff: (avgThisWeek !== null && avgLastWeek !== null) ? avgThisWeek - avgLastWeek : null, 
+                    totalProgress: latestWeight - firstWeight 
+                };
             }, [sortedWeights]);
 
             const monthlyAverages = useMemo(() => {
                 const months = [];
-                let start = new Date(2025, 11, 1);
-                const end = new Date(2026, 11, 1);
-                while (start <= end) {
-                    const label = start.toLocaleString('default', { month: 'short', year: 'numeric' });
-                    const m = start.getMonth();
-                    const y = start.getFullYear();
+                // Start from earliest log or Dec 2025
+                let start = sortedWeights.length > 0 
+                    ? new Date(new Date(sortedWeights[0].date).getFullYear(), new Date(sortedWeights[0].date).getMonth(), 1)
+                    : new Date(2025, 11, 1);
+                
+                const end = new Date();
+                end.setMonth(end.getMonth() + 1);
+
+                const current = new Date(start);
+                while (current <= end && months.length < 12) {
+                    const label = current.toLocaleString('default', { month: 'short', year: 'numeric' });
+                    const m = current.getMonth();
+                    const y = current.getFullYear();
                     const logs = sortedWeights.filter(w => {
                         const d = new Date(w.date + 'T00:00:00');
                         return d.getMonth() === m && d.getFullYear() === y;
                     });
-                    const avg = logs.length ? (logs.reduce((s, w) => s + parseFloat(w.value), 0) / logs.length).toFixed(1) : null;
+                    const avg = logs.length ? (logs.reduce((s, w) => s + w.value, 0) / logs.length).toFixed(1) : null;
                     months.push({ label, avg });
-                    start.setMonth(start.getMonth() + 1);
+                    current.setMonth(current.getMonth() + 1);
                 }
                 return months;
             }, [sortedWeights]);
@@ -276,13 +296,13 @@
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 min-h-[450px] flex flex-col">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
-                                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Weekly Average Trend</h2>
+                                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Weight Average Trend</h2>
                                         <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-tight">Aggregated Sunday - Saturday</p>
                                     </div>
                                 </div>
                                 <div className="flex-grow w-full relative">
                                     {weeklyAverages.length < 1 ? (
-                                        <div className="h-full flex flex-col items-center justify-center text-slate-300 italic">
+                                        <div className="h-full flex flex-col items-center justify-center text-slate-300 italic border-2 border-dashed border-slate-50 rounded-2xl">
                                             <p>Log a weight to see data points</p>
                                         </div>
                                     ) : (
@@ -298,7 +318,7 @@
                                                         dy={10}
                                                     />
                                                     <YAxis 
-                                                        domain={['auto', 'auto']} 
+                                                        domain={['dataMin - 5', 'dataMax + 5']} 
                                                         axisLine={false} 
                                                         tickLine={false} 
                                                         tick={{fontSize: 10, fontWeight: 'bold', fill: '#94a3b8'}} 
@@ -307,7 +327,9 @@
                                                         contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
                                                         labelFormatter={(value, data) => data[0]?.payload?.fullRange || value}
                                                     />
+                                                    <Legend verticalAlign="top" height={36}/>
                                                     <Line 
+                                                        name="Weekly Avg"
                                                         type="monotone" 
                                                         dataKey="avg" 
                                                         stroke="#2563eb" 
@@ -331,7 +353,7 @@
                                     <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Monthly Average Breakdown</h2>
                                 </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                    {monthlyAverages.map((m, idx) => (
+                                    {monthlyAverages.slice(-8).map((m, idx) => (
                                         <div key={idx} className="p-3 border border-slate-50 rounded-xl bg-slate-50/30">
                                             <p className="text-[10px] font-black text-slate-400 uppercase mb-1">{m.label}</p>
                                             <p className={`text-xl font-bold italic ${m.avg ? 'text-slate-800' : 'text-slate-200'}`}>
