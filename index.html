@@ -69,57 +69,62 @@
                 localStorage.setItem('weight_goals', JSON.stringify(goals));
             }, [goals]);
 
+            // Ensure daily logs are always sorted chronologically for processing
             const sortedWeights = useMemo(() => {
                 return [...weights].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
             }, [weights]);
 
-            const getWeekRange = (date) => {
-                const d = new Date(date + 'T00:00:00');
-                const day = d.getDay();
-                const sun = new Date(d);
-                sun.setDate(d.getDate() - day);
+            // Helper to find the Sunday (start of week) for any given date
+            const getWeekRange = (dateString) => {
+                const date = new Date(dateString + 'T00:00:00');
+                const dayOfWeek = date.getDay(); // 0 (Sun) to 6 (Sat)
+                const sun = new Date(date);
+                sun.setDate(date.getDate() - dayOfWeek);
                 const sat = new Date(sun);
                 sat.setDate(sun.getDate() + 6);
                 return { sun, sat };
             };
 
-            // Calculate Sunday-Saturday blocks for both Chart and Table
+            // Calculate Sunday-Saturday blocks
             const weeklyAverages = useMemo(() => {
-                if (!sortedWeights.length) return [];
+                if (sortedWeights.length === 0) return [];
+                
                 const weeksMap = {};
                 
                 sortedWeights.forEach(log => {
                     const { sun, sat } = getWeekRange(log.date);
                     const weekKey = sun.toISOString().split('T')[0];
                     if (!weeksMap[weekKey]) {
-                        weeksMap[weekKey] = { sun, sat, total: 0, count: 0 };
+                        weeksMap[weekKey] = { 
+                            sun, 
+                            sat, 
+                            total: 0, 
+                            count: 0,
+                            dateKey: weekKey 
+                        };
                     }
                     weeksMap[weekKey].total += parseFloat(log.value);
                     weeksMap[weekKey].count += 1;
                 });
 
                 return Object.values(weeksMap)
-                    .sort((a, b) => a.sun.getTime() - b.sun.getTime()) // Chronological for Chart
+                    .sort((a, b) => a.sun.getTime() - b.sun.getTime()) // Crucial: Sort ascending for trend line
                     .map(w => ({
-                        dateKey: w.sun.toISOString().split('T')[0],
-                        label: `${w.sun.toLocaleDateString(undefined, {month:'short', day:'numeric'})}`,
+                        dateKey: w.dateKey,
+                        label: w.sun.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
                         fullRange: `${w.sun.toLocaleDateString(undefined, {month:'short', day:'numeric'})} - ${w.sat.toLocaleDateString(undefined, {month:'short', day:'numeric'})}`,
                         avg: parseFloat((w.total / w.count).toFixed(1)),
                         count: w.count
                     }));
             }, [sortedWeights]);
 
-            // Reverse for the repository list (newest first)
+            // Reverse the averages specifically for the list at the bottom (newest first)
             const weeklyAveragesReversed = useMemo(() => [...weeklyAverages].reverse(), [weeklyAverages]);
 
             const stats = useMemo(() => {
                 if (!sortedWeights.length) return { avgThisWeek: null, avgLastWeek: null, diff: null, totalProgress: null };
                 
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const currentDay = today.getDay(); 
-                const startOfThisWeek = new Date(today);
-                startOfThisWeek.setDate(today.getDate() - currentDay);
+                const { sun: startOfThisWeek } = getWeekRange(new Date().toISOString().split('T')[0]);
                 const startOfLastWeek = new Date(startOfThisWeek);
                 startOfLastWeek.setDate(startOfThisWeek.getDate() - 7);
                 
@@ -140,19 +145,19 @@
 
             const monthlyAverages = useMemo(() => {
                 const months = [];
-                const current = new Date(2025, 11, 1);
+                let start = new Date(2025, 11, 1);
                 const end = new Date(2026, 11, 1);
-                while (current <= end) {
-                    const monthYear = current.toLocaleString('default', { month: 'short', year: 'numeric' });
-                    const m = current.getMonth();
-                    const y = current.getFullYear();
-                    const logsInMonth = sortedWeights.filter(w => {
+                while (start <= end) {
+                    const label = start.toLocaleString('default', { month: 'short', year: 'numeric' });
+                    const m = start.getMonth();
+                    const y = start.getFullYear();
+                    const logs = sortedWeights.filter(w => {
                         const d = new Date(w.date + 'T00:00:00');
                         return d.getMonth() === m && d.getFullYear() === y;
                     });
-                    const avg = logsInMonth.length ? (logsInMonth.reduce((sum, w) => sum + parseFloat(w.value), 0) / logsInMonth.length).toFixed(1) : null;
-                    months.push({ label: monthYear, avg });
-                    current.setMonth(current.getMonth() + 1);
+                    const avg = logs.length ? (logs.reduce((s, w) => s + parseFloat(w.value), 0) / logs.length).toFixed(1) : null;
+                    months.push({ label, avg });
+                    start.setMonth(start.getMonth() + 1);
                 }
                 return months;
             }, [sortedWeights]);
@@ -165,8 +170,8 @@
                 setInputValue('');
             };
 
-            const handleGoalChange = (field, value) => setGoals(prev => ({ ...prev, [field]: value }));
             const deleteEntry = (id) => setWeights(weights.filter(w => w.id !== id));
+            
             const formatDate = (dateStr) => {
                 const [y, m, d] = dateStr.split('-');
                 return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -272,18 +277,18 @@
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 min-h-[450px] flex flex-col">
                                 <div className="flex justify-between items-start mb-6">
                                     <div>
-                                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Weight Progression</h2>
-                                        <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-tight">Data Points: Weekly Averages (Sun-Sat)</p>
+                                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Weekly Average Trend</h2>
+                                        <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-tight">Aggregated Sunday - Saturday</p>
                                     </div>
                                 </div>
                                 <div className="flex-grow w-full">
-                                    {weeklyAverages.length < 2 ? (
+                                    {weeklyAverages.length < 1 ? (
                                         <div className="h-full flex flex-col items-center justify-center text-slate-300 italic">
-                                            <p>Log entries for 2 different weeks to see trend</p>
+                                            <p>Log a weight to see data points</p>
                                         </div>
                                     ) : (
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart data={weeklyAverages} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                            <LineChart data={weeklyAverages} margin={{ top: 10, right: 30, left: -20, bottom: 0 }}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                                 <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
                                                 <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
@@ -291,7 +296,15 @@
                                                     contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
                                                     labelFormatter={(value, data) => data[0]?.payload?.fullRange || value}
                                                 />
-                                                <Line type="monotone" dataKey="avg" stroke="#2563eb" strokeWidth={4} dot={{r: 5, fill: '#2563eb', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 8}} />
+                                                <Line 
+                                                    type="monotone" 
+                                                    dataKey="avg" 
+                                                    stroke="#2563eb" 
+                                                    strokeWidth={4} 
+                                                    dot={{r: 5, fill: '#2563eb', strokeWidth: 2, stroke: '#fff'}} 
+                                                    activeDot={{r: 8}}
+                                                    isAnimationActive={false}
+                                                />
                                             </LineChart>
                                         </ResponsiveContainer>
                                     )}
